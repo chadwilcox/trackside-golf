@@ -1,6 +1,6 @@
 // Offline support: precache the app shell, cache Google Fonts the first time they load.
 // Bump VERSION whenever any app file changes so phones pick up the new copy.
-const VERSION = 'trackside-v1';
+const VERSION = 'trackside-v2';
 const SHELL = [
   './',
   './index.html',

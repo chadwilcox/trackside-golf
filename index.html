@@ -32,6 +32,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{height:100%}
 body{height:100%;margin:0;background:var(--pine);color:var(--chalk);font:500 15px/1.35 var(--ui);overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 #game{position:relative;height:100%;overflow:hidden;background:var(--pine)}
@@ -120,6 +121,34 @@ table.card{border-collapse:collapse;width:100%;min-width:350px;font-variant-nume
 .big div{display:grid;gap:2px}
 .big b{font:700 30px/1 var(--display);font-variant-numeric:tabular-nums}
 .big span{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--chalk-dim)}
+.club:disabled{opacity:.28;cursor:not-allowed}
+.av{display:block;flex:none;border-radius:50%;overflow:hidden;background:var(--pine)}
+.av svg{display:block;width:100%;height:100%}
+.who{display:flex;align-items:center;gap:12px}
+.who .grow{flex:1;min-width:0}
+.who b{display:block;font:700 22px/1.1 var(--display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.sm{flex:none;padding:8px 14px;font-size:14px}
+.daily{border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px;background:rgba(236,232,214,.04)}
+.daily.done{border-color:rgba(240,196,84,.55)}
+.daily .dtext{font:700 21px/1.15 var(--display);text-wrap:balance}
+.daily .dmeta{font-size:13.5px;color:var(--chalk-dim)}
+.daily .dmeta b{color:var(--sun)}
+.plist{display:grid;gap:8px}
+.prow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:12px;padding:6px 6px 6px 8px}
+.prow.on{border-color:var(--sun)}
+.prow .pick{appearance:none;flex:1;min-width:0;display:flex;align-items:center;gap:12px;background:none;border:0;color:var(--chalk);font-family:var(--ui);text-align:left;cursor:pointer;padding:2px}
+.prow .pick b{display:block;font:700 18px/1.15 var(--display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .pick small{display:block;font-size:12.5px;color:var(--chalk-dim)}
+.editor-top{display:flex;align-items:center;gap:16px}
+.editor-top .grow{flex:1;min-width:0;display:grid;gap:6px}
+input.name{width:100%;font:700 20px var(--display);background:rgba(236,232,214,.07);border:1px solid var(--line);border-radius:10px;color:var(--chalk);padding:9px 12px}
+input.name::placeholder{color:var(--chalk-dim);opacity:.7}
+.opt{display:grid;gap:8px}
+.sw-row{display:flex;flex-wrap:wrap;gap:9px}
+.sw{appearance:none;width:34px;height:34px;border-radius:50%;border:0;background:var(--c);box-shadow:inset 0 0 0 1px rgba(0,0,0,.3);cursor:pointer;padding:0}
+.sw[aria-pressed="true"]{box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 0 0 2px var(--pine-2),0 0 0 4px var(--chalk)}
+.chip{appearance:none;border:1px solid var(--line);background:transparent;color:var(--chalk);border-radius:999px;padding:7px 13px;font:600 14px var(--ui);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--chalk);color:var(--pine);border-color:var(--chalk)}
 :focus-visible{outline:2px solid var(--sun);outline-offset:2px}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 @media (max-width:360px){.hole-n{font-size:34px}.wind .from{display:none}}
@@ -284,16 +313,105 @@ const ROCK_COL = ['#8d877c','#a19b8f','#767066'];
 
 /* ---------- Game state ---------- */
 const KEY = 'trackside-par3-v1';
-let store = {best:null, round:null, sound:true};
+let store = {v:2, sound:true, players:[], active:null};
 let round = null, hole = null, teeI = 0, strokes = 0;
+let mode = null, chal = null, chalResult = null, lastNewBest = false, draft = null, deleteArmed = false;
+let stance = null, swingAnim = null;
 let ball = {x:0, y:0, z:0, vx:0, vy:0, lie:'tee', sink:0};
 let pin = {x:0, y:0}, wind = {mph:0, ang:0, ux:0, uy:0};
 let shotStart = null, flight = null, clubI = 0, state = 'menu', sheetMode = null;
 let trail = [], lipped = false, rollT = 0, hop = false, celebrate = null;
 let drag = null, aim = null, restartArmed = false;
 
-function load() { try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) store = Object.assign(store, s); } catch (e) {} round = store.round; }
-function save() { store.round = round; try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
+function load() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+  if (s && Array.isArray(s.players)) store = Object.assign(store, s);
+  else if (s) {
+    // Saves from before golfers existed: carry the best round and any round in progress over to one golfer
+    store.sound = s.sound !== false;
+    if (s.best != null || s.round) { const p = newPlayer('Golfer', randomLook()); p.best = s.best; p.round = s.round; store.players.push(p); store.active = p.id; }
+  }
+  if (!cur() && store.players.length) store.active = store.players[0].id;
+  round = cur() ? cur().round : null;
+}
+function save() { const p = cur(); if (p) p.round = round; try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
+
+/* ---------- Golfers ---------- */
+const SKIN = ['#f6d7bf','#eac09a','#d39b6e','#b07a4f','#8a5a37','#5e3b24'];
+const HAIR = ['#1f1a17','#4a3020','#8a4b2a','#c9a05a','#9c968d','#e6e0d2'];
+const HATS = [['none','None'],['cap','Cap'],['visor','Visor'],['bucket','Bucket'],['beanie','Beanie']];
+const KIT = ['#e2533a','#f0c454','#2f6fb3','#1f3d6b','#2e8a57','#f4f1e8','#2a2a2a','#c45ea0','#e58a2f','#7a4fb3'];
+const pick = a => a[(Math.random()*a.length)|0];
+function randomLook() { return {skin:pick(SKIN), hair:pick(HAIR), hat:pick(HATS)[0], hatCol:pick(KIT), shirt:pick(KIT)}; }
+function newPlayer(name, look) {
+  return {id:Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, look, best:null, round:null,
+    daily:{last:null, streak:0, bestStreak:0, wins:0, triesDay:null, tries:0}};
+}
+function cur() { return store.players.find(p => p.id === store.active) || null; }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function avatarSVG(L) {
+  const shade = 'rgba(0,0,0,.2)';
+  const hair = `<path d="M19.5 28C19 16 26 13.5 32 13.5S45 16 44.5 28C42 22 37 20 32 20S22 22 19.5 28Z" fill="${L.hair}"/>`;
+  const sides = `<path d="M19.6 23.5C19.2 28 20 31 21.6 33H23.4V23.5Z M44.4 23.5C44.8 28 44 31 42.4 33H40.6V23.5Z" fill="${L.hair}"/>`;
+  const hats = {
+    none: hair,
+    cap: `${sides}<path d="M19.5 25.5C19.5 13.5 44.5 13.5 44.5 25.5Z" fill="${L.hatCol}"/><path d="M32 13.6V25.5" stroke="${shade}" stroke-width="1"/><ellipse cx="32" cy="25.6" rx="15" ry="3.3" fill="${L.hatCol}"/><ellipse cx="32" cy="26.2" rx="15" ry="2.6" fill="${shade}"/><circle cx="32" cy="14.2" r="1.4" fill="${L.hatCol}"/>`,
+    visor: `${hair}<rect x="19.3" y="21.6" width="25.4" height="4.4" rx="2" fill="${L.hatCol}"/><ellipse cx="32" cy="26" rx="14.5" ry="3" fill="${L.hatCol}"/><ellipse cx="32" cy="26.6" rx="14.5" ry="2.3" fill="${shade}"/>`,
+    bucket: `${sides}<path d="M21.5 23.5C21.5 12 42.5 12 42.5 23.5Z" fill="${L.hatCol}"/><path d="M15 26.5C17 21 47 21 49 26.5C47 29 17 29 15 26.5Z" fill="${L.hatCol}"/><path d="M15 26.5C17 29 47 29 49 26.5C47 27.6 17 27.6 15 26.5Z" fill="${shade}"/>`,
+    beanie: `${sides}<path d="M19.4 25C19.4 11.5 44.6 11.5 44.6 25Z" fill="${L.hatCol}"/><rect x="18.8" y="21.5" width="26.4" height="5.5" rx="2.2" fill="${L.hatCol}"/><rect x="18.8" y="21.5" width="26.4" height="5.5" rx="2.2" fill="${shade}"/><circle cx="32" cy="11.6" r="3.6" fill="${L.hatCol}"/><circle cx="33" cy="12.4" r="2.2" fill="${shade}"/>`,
+  };
+  return `<svg viewBox="0 0 64 64" aria-hidden="true">
+    <path d="M9 64C9 49 19 42.5 32 42.5S55 49 55 64Z" fill="${L.shirt}"/>    <rect x="28" y="35" width="8" height="9" rx="2" fill="${L.skin}"/>
+    <path d="M26.5 43L32 49.5L37.5 43" fill="none" stroke="rgba(0,0,0,.22)" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="20.3" cy="29.5" r="2.6" fill="${L.skin}"/><circle cx="43.7" cy="29.5" r="2.6" fill="${L.skin}"/>
+    <circle cx="32" cy="28" r="12" fill="${L.skin}"/>
+    <circle cx="27.3" cy="29.6" r="1.45" fill="#1f1a17"/><circle cx="36.7" cy="29.6" r="1.45" fill="#1f1a17"/>
+    <path d="M28.3 34.2Q32 37.2 35.7 34.2" fill="none" stroke="#1f1a17" stroke-width="1.5" stroke-linecap="round"/>
+    ${hats[L.hat] || hair}
+  </svg>`;
+}
+const avatar = (L, px) => `<span class="av" style="width:${px}px;height:${px}px">${avatarSVG(L)}</span>`;
+
+/* ---------- Daily challenge (seeded by the date, so everyone gets the same one) ---------- */
+function dayKey(offset = 0) { const d = new Date(); d.setDate(d.getDate() + offset); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function hashStr(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; }
+const ONE_CLUB = [{h:5, club:'sw'}, {h:7, club:'lw'}, {h:8, club:'lw'}];
+function dailyChallenge(day = dayKey()) {
+  const r = mulberry32(hashStr('trackside|' + day));
+  const roll = r();
+  const type = roll < .28 ? 'par' : roll < .46 ? 'green' : roll < .62 ? 'close' : roll < .78 ? 'putt' : roll < .9 ? 'birdie' : 'oneclub';
+  let h = (r()*9)|0, club = null;
+  if (type === 'birdie') h = [5, 6, 7, 8][(r()*4)|0];
+  if (type === 'oneclub') { const o = ONE_CLUB[(r()*ONE_CLUB.length)|0]; h = o.h; club = o.club; }
+  const a = r()*Math.PI*2, pr = r()*.5*GR*YD;
+  const c = {day, type, h, club, pin:{dx:Math.cos(a)*pr, dy:Math.sin(a)*pr}, wind:{mph:Math.round(r()*14), ang:r()*Math.PI*2}};
+  const n = h + 1;
+  if (type === 'par') Object.assign(c, {target:3, short:'Par', text:`Make par or better on hole ${n}`});
+  if (type === 'birdie') Object.assign(c, {target:2, short:'Birdie', text:`Make birdie on hole ${n}`});
+  if (type === 'oneclub') {
+    const cn = CLUBS.find(k => k.id === club).name;
+    Object.assign(c, {target:3, short:'Par', text:`Make par on hole ${n} using only your ${cn} and putter`});
+  }
+  if (type === 'green') Object.assign(c, {short:'Green', text:`Hit the green with your tee shot on hole ${n}`});
+  if (type === 'close') { c.ft = HOLES[h].yds >= 100 ? 20 : 15; Object.assign(c, {short:`${c.ft} ft`, text:`Stick your tee shot within ${c.ft} feet on hole ${n}`}); }
+  if (type === 'putt') {
+    // Start the ball on the green a set distance from the pin, at an angle that keeps it on the putting surface
+    c.ft = 10 + ((r()*15)|0);
+    const g = HOLES[h].green, px = g.x + c.pin.dx, py = g.y + c.pin.dy;
+    let d = c.ft/3*YD, ang = r()*Math.PI*2, spot = null;
+    for (let tries = 0; tries < 60 && !spot; tries++) {
+      const x = px + Math.cos(ang)*d, y = py + Math.sin(ang)*d;
+      if (Math.hypot(x-g.x, y-g.y) < (GR-.8)*YD) spot = {x, y};
+      ang += .45; if (tries % 14 === 13) d *= .9;
+    }
+    c.ft = Math.round(Math.hypot(spot.x-px, spot.y-py)/YD*3);
+    c.start = spot;
+    Object.assign(c, {short:'1 putt', text:`Sink a ${c.ft}-foot putt on hole ${n}`});
+  }
+  return c;
+}
+function streakNow(d) { return d.last === dayKey() || d.last === dayKey(-1) ? d.streak : 0; }
 
 /* ---------- Camera ---------- */
 let W = 0, H = 0, DPR = 1, cam = null, fade = 1, hudTopH = 90, hudBotH = 170;
@@ -553,6 +671,46 @@ function drawBall(t) {
     ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(g.x, g.y, pr, 0, 7); ctx.stroke();
   }
 }
+// Top-down golfer addressing the ball, right-handed: stands left of the target line, facing the ball
+function drawGolfer(now) {
+  const p = cur(); if (!stance || !p) return;
+  const L = p.look, putt = !!CLUBS[clubI].putt;
+  if (state === 'aim' && aim) stance.ang = aim.ang;
+  let club = 0;
+  if (state === 'aim' && drag && aim) club = aim.power*(putt ? .9 : 2.3);
+  else if (swingAnim) {
+    const k = Math.min(1, (now - swingAnim.t0)/200), e = 1 - Math.pow(1-k, 3);
+    club = swingAnim.from + ((putt ? -.8 : -2.5) - swingAnim.from)*e;
+  }
+  const GS = 1.3, b = toScreen(stance), a = stance.ang + cam.rot, tx = Math.cos(a), ty = Math.sin(a);
+  const gx = b.x + ty*16*GS, gy = b.y - tx*16*GS;
+  ctx.save(); ctx.translate(gx, gy); ctx.scale(GS, GS);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2.5, 2.5, 9.5, 9.5, 0, 0, 7); ctx.fill();
+  ctx.rotate(a);
+  // local frame: +x toward the target, +y toward the ball
+  // club pivots at the hands; at address the head sits just behind the ball, swinging back away from the target
+  const hx = 0, hy = 9, cl = 7, ca = Math.atan2(3, 6) + club;
+  const ex = hx - Math.sin(ca)*cl, ey = hy + Math.cos(ca)*cl;
+  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.fillStyle = '#c9ccd0'; ctx.beginPath(); ctx.arc(ex, ey, 1.6, 0, 7); ctx.fill();
+  ctx.save(); ctx.rotate(club*.18);
+  ctx.strokeStyle = L.shirt; ctx.lineWidth = 3.4;
+  ctx.beginPath(); ctx.moveTo(-7, 1.5); ctx.lineTo(hx, hy); ctx.moveTo(7, 1.5); ctx.lineTo(hx, hy); ctx.stroke();
+  ctx.fillStyle = L.skin; ctx.beginPath(); ctx.arc(hx, hy, 2.1, 0, 7); ctx.fill();
+  ctx.fillStyle = L.shirt; ctx.beginPath(); ctx.ellipse(0, 0, 10, 5.4, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = .8; ctx.stroke();
+  ctx.restore();
+  const hat = L.hat, dark = 'rgba(0,0,0,.22)';
+  const disc = (x, y, r, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); };
+  if (hat === 'bucket') { disc(0, 0, 7, L.hatCol); disc(0, 0, 7, dark); disc(0, 0, 4.8, L.hatCol); }
+  else if (hat === 'cap') { ctx.fillStyle = L.hatCol; ctx.beginPath(); ctx.ellipse(0, 4.2, 4, 2.6, 0, 0, 7); ctx.fill(); disc(0, 0, 5, L.hatCol); disc(0, 0, 1, dark); }
+  else if (hat === 'visor') { ctx.fillStyle = L.hatCol; ctx.beginPath(); ctx.ellipse(0, 4.3, 4, 2.6, 0, 0, 7); ctx.fill(); disc(0, 0, 5, L.hair); ctx.strokeStyle = L.hatCol; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(0, 0, 4.3, 0, 7); ctx.stroke(); }
+  else if (hat === 'beanie') { disc(0, 0, 5.2, L.hatCol); disc(0, 0, 5.2, 'rgba(0,0,0,.1)'); disc(0, 0, 2, L.hatCol); }
+  else { disc(0, 0, 5, L.skin); disc(0, -1, 4.6, L.hair); }
+  ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = .7; ctx.beginPath(); ctx.arc(0, 0, hat === 'bucket' ? 7 : 5.1, 0, 7); ctx.stroke();
+  ctx.restore();
+}
 function drawCelebrate(now) {
   if (!celebrate) return;
   const k = (now - celebrate) / 900; if (k > 1) { celebrate = null; return; }
@@ -570,7 +728,7 @@ function draw(now) {
   ctx.drawImage(cache, 0, 0); ctx.globalAlpha = 1;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   if (!cam || sheetMode || !hole) return;
-  drawSlope(t); drawPin(t); drawCelebrate(now); drawAim(); drawBall(t);
+  drawSlope(t); drawPin(t); drawCelebrate(now); drawGolfer(now); drawAim(); drawBall(t);
 }
 
 /* ---------- Sound ---------- */
@@ -610,27 +768,73 @@ function newRound() {
     winds: HOLES.map(() => ({mph:Math.round(Math.random()*13), ang:Math.random()*Math.PI*2}))};
   save(); startHole(0);
 }
-function startHole(i, tee = 0) {
-  round.hole = i; hole = HOLES[i]; teeI = tee;
-  const t = hole.tees[teeI];
-  ball = {x:t.x, y:t.y, z:0, vx:0, vy:0, lie:'tee', sink:0};
-  pin = {x:hole.green.x + round.pins[i].dx, y:hole.green.y + round.pins[i].dy};
-  const w = round.winds[i]; wind = {mph:w.mph, ang:w.ang, ux:Math.cos(w.ang), uy:Math.sin(w.ang)};
-  strokes = 0; trail = []; flight = null; celebrate = null;
-  save(); closeSheet(); prepareShot(true);
+function setupHole(i, tee, pinOff, w, start) {
+  hole = HOLES[i]; teeI = tee;
+  const t = start || hole.tees[teeI];
+  ball = {x:t.x, y:t.y, z:0, vx:0, vy:0, lie:start ? 'green' : 'tee', sink:0};
+  pin = {x:hole.green.x + pinOff.dx, y:hole.green.y + pinOff.dy};
+  wind = {mph:w.mph, ang:w.ang, ux:Math.cos(w.ang), uy:Math.sin(w.ang)};
+  strokes = 0; trail = []; flight = null; celebrate = null; shotStart = null;
+  closeSheet(); prepareShot(true);
 }
+function startHole(i, tee = 0) {
+  mode = 'round'; round.hole = i; save();
+  setupHole(i, tee, round.pins[i], round.winds[i]);
+}
+function startChallenge() {
+  const d = cur().daily, today = dayKey();
+  chal = dailyChallenge(today); mode = 'challenge';
+  if (d.triesDay !== today) { d.triesDay = today; d.tries = 0; }
+  d.tries++; save();
+  setupHole(chal.h, 0, chal.pin, chal.wind, chal.start);
+}
+function allowedClub(i) { return !(mode === 'challenge' && chal.club) || CLUBS[i].putt || CLUBS[i].id === chal.club; }
 function autoClub() {
   if (ball.lie === 'green' || ball.lie === 'fringe') return 4;
+  if (mode === 'challenge' && chal.club) return CLUBS.findIndex(k => k.id === chal.club);
   const d = dist(ball, pin)/YD / (LIES[ball.lie] || LIES.rough).pow;
   return d <= 28 ? 3 : d <= 64 ? 2 : d <= 87 ? 1 : 0;
 }
 function prepareShot(animate) {
-  clubI = autoClub(); state = 'aim'; aim = null;
+  if (mode === 'challenge' && strokes > 0 && challengeOver()) return;
+  clubI = autoClub(); state = 'aim'; aim = null; swingAnim = null;
+  stance = {x:ball.x, y:ball.y, ang:Math.atan2(pin.y-ball.y, pin.x-ball.x)};
   updateHud(); refreshCamera(animate);
+}
+// Called each time the ball comes to rest short of the cup during a challenge; true when the attempt has ended
+function challengeOver() {
+  const c = chal, ft = Math.max(1, Math.round(dist(ball, pin)/YD*3));
+  let ok = null, detail = '';
+  if (c.type === 'green') {
+    ok = strokes === 1 && ball.lie === 'green';
+    detail = ok ? 'On the green in one.' : strokes > 1 ? 'A penalty on the tee shot.' : ball.lie === 'fringe' ? 'Just onto the fringe. So close.' : `Finished in the ${(LIES[ball.lie] || LIES.rough).name.toLowerCase()}.`;
+  } else if (c.type === 'close') {
+    ok = strokes === 1 && ft <= c.ft;
+    detail = strokes > 1 ? 'A penalty on the tee shot.' : ok ? `Stuck it to ${ft} ft.` : `It finished ${ft} ft from the pin.`;
+  } else if (c.type === 'putt') {
+    ok = false; detail = `Missed. It stopped ${ft} ft away.`;
+  } else if (strokes >= c.target) {
+    ok = false; detail = `Not in after ${c.target} ${c.target === 1 ? 'shot' : 'shots'}.`;
+  }
+  if (ok === null) return false;
+  state = 'wait';
+  toast(ok ? 'Challenge complete!' : 'Not this time', detail, 1500, ok);
+  setTimeout(() => endChallenge(ok, detail), 1500);
+  return true;
+}
+function endChallenge(ok, detail) {
+  const d = cur().daily, today = dayKey();
+  if (ok && d.last !== today) {
+    d.streak = d.last === dayKey(-1) ? d.streak + 1 : 1;
+    d.bestStreak = Math.max(d.bestStreak, d.streak); d.wins++; d.last = today;
+  }
+  chalResult = {ok, detail}; save();
+  openSheet('daily');
 }
 function swing(power, ang) {
   const club = CLUBS[clubI], lie = LIES[ball.lie] || LIES.rough;
   strokes++; shotStart = {x:ball.x, y:ball.y, lie:ball.lie}; trail = [];
+  swingAnim = {t0:performance.now(), from:power*(club.putt ? .9 : 2.3)};
   const pen = 1 + Math.max(0, power-1)*14;
   buzz(club.putt ? 8 : 15);
   if (club.putt) {
@@ -764,21 +968,28 @@ function holeOut() {
   state = 'holed'; ball.vx = ball.vy = 0; ball.z = 0; ball.x = pin.x; ball.y = pin.y;
   sfx.cup(); buzz([20, 40, 30]); celebrate = performance.now();
   const name = SCORE_NAMES[strokes] || `${strokes} strokes`;
+  if (mode === 'challenge') {
+    const ok = chal.target ? strokes <= chal.target : strokes === 1;
+    const detail = chal.type === 'putt' ? `Drained the ${chal.ft}-footer.` : strokes === 1 ? 'Holed it from the tee!' : `${name} on hole ${hole.n}.`;
+    toast(name, ok ? 'Challenge complete!' : '', 1600, ok);
+    setTimeout(() => endChallenge(ok, detail), 1600);
+    return;
+  }
   const tp = toParOf([...round.scores.slice(0, round.hole), strokes]);
-  toast(name, strokes === 1 ? 'Drinks are on you.' : `${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · ${fmtPar(tp)} for the round`, 1700, strokes <= 2);
+  toast(name, strokes === 1 ? `Drinks are on ${cur().name}.` : `${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · ${fmtPar(tp)} for the round`, 1700, strokes <= 2);
   setTimeout(() => finishHole(strokes), 1700);
 }
 function pickUp() {
   state = 'holed';
   toast('Picked up', `Max is ${MAXS} strokes on a hole.`, 1700);
-  setTimeout(() => finishHole(MAXS), 1700);
+  setTimeout(() => mode === 'challenge' ? endChallenge(false, `Picked up at ${MAXS} strokes.`) : finishHole(MAXS), 1700);
 }
 function finishHole(score) {
   round.scores[round.hole] = score; save();
   if (round.scores.every(s => s != null)) {
-    const total = round.scores.reduce((a, b) => a + b, 0);
-    store.lastNewBest = store.best == null || total < store.best;
-    if (store.lastNewBest) store.best = total;
+    const p = cur(), total = round.scores.reduce((a, b) => a + b, 0);
+    lastNewBest = p.best == null || total < p.best;
+    if (lastNewBest) p.best = total;
     save(); openSheet('final');
   } else openSheet('result');
 }
@@ -789,7 +1000,7 @@ function fmtPar(n) { return n === 0 ? 'E' : n > 0 ? `+${n}` : `−${-n}`; }
 const clubsEl = $('#clubs');
 clubsEl.innerHTML = CLUBS.map((c, i) => `<button class="club" type="button" data-i="${i}" aria-pressed="false"><b>${c.name}</b><span>${c.label}</span></button>`).join('');
 clubsEl.addEventListener('click', e => {
-  const b = e.target.closest('.club'); if (!b || state !== 'aim') return;
+  const b = e.target.closest('.club'); if (!b || state !== 'aim' || !allowedClub(+b.dataset.i)) return;
   clubI = +b.dataset.i; updateHud();
 });
 $('#tees').addEventListener('click', e => {
@@ -813,23 +1024,28 @@ function updateHud() {
   if (!hole) return;
   const t = hole.tees[teeI];
   $('#holeN').textContent = hole.n;
-  $('#holeMeta').textContent = `Par 3 · ${t.yds} yd`;
-  const played = round.scores.filter(s => s != null).length;
-  $('#toPar').textContent = fmtPar(toParOf(round.scores));
-  $('#thru').textContent = `Thru ${played}`;
+  if (mode === 'challenge') {
+    $('#holeMeta').textContent = chal.type === 'putt' ? `Daily · ${chal.ft} ft putt` : `Daily · ${t.yds} yd`;
+    $('#toPar').textContent = chal.short;
+    $('#thru').textContent = 'Goal';
+  } else {
+    $('#holeMeta').textContent = `Par 3 · ${t.yds} yd`;
+    $('#toPar').textContent = fmtPar(toParOf(round.scores));
+    $('#thru').textContent = `Thru ${round.scores.filter(s => s != null).length}`;
+  }
   const lie = LIES[ball.lie] || LIES.rough;
   $('#lie').style.setProperty('--lie', lie.col);
   $('#lieName').textContent = lie.name;
   const d = dist(ball, pin)/YD;
   $('#dist').innerHTML = (ball.lie === 'green' || d < 20) ? `${Math.max(1, Math.round(d*3))}<small>ft to pin</small>` : `${Math.round(d)}<small>yd to pin</small>`;
   $('#shot').textContent = state === 'aim' ? `Shot ${strokes+1}` : `Shot ${strokes}`;
-  clubsEl.querySelectorAll('.club').forEach((b, i) => b.setAttribute('aria-pressed', String(i === clubI)));
+  clubsEl.querySelectorAll('.club').forEach((b, i) => { b.setAttribute('aria-pressed', String(i === clubI)); b.disabled = !allowedClub(i); });
   const teesEl = $('#tees');
-  teesEl.hidden = !(hole.tees.length > 1 && strokes === 0 && state === 'aim');
+  teesEl.hidden = !(mode === 'round' && hole.tees.length > 1 && strokes === 0 && state === 'aim');
   if (!teesEl.hidden) teesEl.innerHTML = hole.tees.map((tt, i) => `<button class="tee-btn" type="button" data-t="${i}" aria-pressed="${i === teeI}">${tt.name} · ${tt.yds} yd</button>`).join('');
-  $('#hint').textContent = state === 'aim'
-    ? (CLUBS[clubI].putt ? 'Putting: read the slope arrows, then drag back and let go' : 'Drag back anywhere and let go to swing')
-    : '';
+  $('#hint').textContent = state !== 'aim' ? ''
+    : mode === 'challenge' ? `Daily: ${chal.text}`
+    : CLUBS[clubI].putt ? 'Putting: read the slope arrows, then drag back and let go' : 'Drag back anywhere and let go to swing';
 }
 function pullLen() { return Math.max(150, Math.min(300, (H - hudTopH - hudBotH)*.42)); }
 function showPower(on) {
@@ -882,52 +1098,98 @@ function mark(s) {
   const cls = s === 1 ? 'ace' : s === 2 ? 'birdie' : s === 4 ? 'bogey' : s >= 5 ? 'dbl' : '';
   return `<span class="m ${cls}">${s}</span>`;
 }
-function cardTable(cur) {
+function cardTable(at) {
   const sc = round ? round.scores : Array(9).fill(null);
   const tot = sc.some(s => s != null) ? sc.reduce((a, s) => a + (s || 0), 0) : '';
-  const cell = (i, v) => `<td class="${i === cur ? 'cur' : ''}">${v}</td>`;
-  return `<div class="card-wrap"><table class="card"><thead><tr><th scope="row">Hole</th>${HOLES.map((h, i) => `<th class="${i === cur ? 'cur' : ''}">${h.n}</th>`).join('')}<th class="tot">Tot</th></tr></thead><tbody>
+  const cell = (i, v) => `<td class="${i === at ? 'cur' : ''}">${v}</td>`;
+  const who = cur() ? esc(cur().name.slice(0, 8)) : 'You';
+  return `<div class="card-wrap"><table class="card"><thead><tr><th scope="row">Hole</th>${HOLES.map((h, i) => `<th class="${i === at ? 'cur' : ''}">${h.n}</th>`).join('')}<th class="tot">Tot</th></tr></thead><tbody>
     <tr><th scope="row">Yards</th>${HOLES.map((h, i) => cell(i, h.yds)).join('')}<td class="tot">818</td></tr>
     <tr><th scope="row">Par</th>${HOLES.map((h, i) => cell(i, 3)).join('')}<td class="tot">27</td></tr>
-    <tr class="you"><th scope="row">You</th>${sc.map((s, i) => cell(i, mark(s))).join('')}<td class="tot">${tot}</td></tr>
+    <tr class="you"><th scope="row">${who}</th>${sc.map((s, i) => cell(i, mark(s))).join('')}<td class="tot">${tot}</td></tr>
   </tbody></table></div>`;
 }
 function nextUnplayed() { return round ? round.scores.findIndex(s => s == null) : -1; }
-function openSheet(mode) {
-  sheetMode = mode; restartArmed = false; drag = null; aim = null; showPower(false);
+const soundBtn = () => `<button class="btn ghost" data-act="sound" type="button">Sound: ${store.sound ? 'On' : 'Off'}</button>`;
+function editorHTML() {
+  const L = draft.look, first = !store.players.length;
+  const sw = (k, c) => `<button class="sw" type="button" data-act="look" data-k="${k}" data-v="${c}" style="--c:${c}" aria-pressed="${L[k] === c}" aria-label="${k} ${c}"></button>`;
+  const row = (label, k, list) => `<div class="opt"><div class="eyebrow">${label}</div><div class="sw-row">${list.map(c => sw(k, c)).join('')}</div></div>`;
+  const editing = draft.id && store.players.some(p => p.id === draft.id);
+  return `<div><div class="eyebrow">${first ? 'Welcome to Trackside' : editing ? 'Edit golfer' : 'New golfer'}</div><h2>${first ? 'Who’s teeing off?' : editing ? 'Change your look' : 'Make your golfer'}</h2></div>
+    <div class="editor-top"><span class="av" id="preview" style="width:96px;height:96px">${avatarSVG(L)}</span>
+      <div class="grow"><label class="eyebrow" for="pname">Name</label><input class="name" id="pname" maxlength="16" autocomplete="off" autocapitalize="words" enterkeyhint="done" placeholder="Your name" value="${esc(draft.name)}"></div></div>
+    ${row('Skin', 'skin', SKIN)}
+    ${row('Hair', 'hair', HAIR)}
+    <div class="opt"><div class="eyebrow">Hat</div><div class="sw-row">${HATS.map(([id, label]) => `<button class="chip" type="button" data-act="look" data-k="hat" data-v="${id}" aria-pressed="${L.hat === id}">${label}</button>`).join('')}</div></div>
+    ${row('Hat color', 'hatCol', KIT)}
+    ${row('Shirt', 'shirt', KIT)}
+    <div class="actions"><button class="btn" data-act="saveP" type="button">${first ? 'Let’s play' : 'Save golfer'}</button><button class="btn ghost" data-act="shuffle" type="button">Shuffle look</button></div>
+    ${first ? '' : `<div class="actions"><button class="btn ghost" data-act="players" type="button">Cancel</button>${editing && store.players.length > 1 ? '<button class="btn ghost" data-act="deleteP" type="button">Delete golfer</button>' : ''}</div>`}`;
+}
+function openSheet(kind) {
+  sheetMode = kind; restartArmed = false; deleteArmed = false; drag = null; aim = null; showPower(false);
+  const p = cur();
   let h = '';
-  const best = store.best != null ? `Best round: ${store.best} (${fmtPar(store.best - 27)})` : 'No rounds finished yet.';
-  if (mode === 'start') {
+  const best = p && p.best != null ? `Best round: ${p.best} (${fmtPar(p.best - 27)})` : 'No rounds finished yet.';
+  if (kind === 'start') {
     const nu = nextUnplayed(), canContinue = round && nu > 0;
-    h = `<div><div class="eyebrow">Mapleton, Maine · 9 holes · Par 27</div><h1>Trackside Par 3</h1>
+    const d = p.daily, c = dailyChallenge(), today = dayKey(), done = d.last === today, tries = d.triesDay === today ? d.tries : 0, st = streakNow(d);
+    const dateLabel = new Date().toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+    const meta = done ? `<b>Done today</b> · ${st}-day streak` :
+      (tries ? `${tries} ${tries === 1 ? 'try' : 'tries'} today · ` : '') + (st ? `${st}-day streak on the line` : 'Same challenge for everyone today. Unlimited tries.');
+    const isNew = p.best == null && !p.round && !d.wins && !tries;
+    h = `<div class="who">${avatar(p.look, 48)}<div class="grow"><div class="eyebrow">Playing as</div><b>${esc(p.name)}</b></div><button class="btn ghost sm" data-act="players" type="button">Change</button></div>
+      <div><div class="eyebrow">Mapleton, Maine · 9 holes · Par 27</div><h1>Trackside Par 3</h1>
       <p class="lede">Nine short holes between the tree line and the railroad. Carry the pond on 4, play the hill on 7 and 9, and keep it out of the woods.</p></div>
-      <ul class="howto">
+      <div class="daily ${done ? 'done' : ''}"><div class="eyebrow">Daily challenge · ${dateLabel}</div><div class="dtext">${c.text}</div><div class="dmeta">${meta}</div>
+        <div class="actions"><button class="btn ${done ? 'ghost' : ''}" data-act="daily" type="button">${done ? 'Play it again' : tries ? 'Try again' : 'Take the challenge'}</button></div></div>
+      ${isNew ? `<ul class="howto">
         <li><b>Swing</b><span>Drag back anywhere on the course and let go. A longer pull hits it farther.</span></li>
         <li><b>Aim</b><span>The ball flies opposite your pull. The ring shows carry with no wind.</span></li>
         <li><b>Read</b><span>Wind moves the ball in the air. Greens tilt, and the arrows show which way putts break.</span></li>
-      </ul>
-      <div class="actions">${canContinue ? `<button class="btn" data-act="continue" type="button">Continue · Hole ${nu+1}</button><button class="btn ghost" data-act="new" type="button">New round</button>` : `<button class="btn" data-act="new" type="button">Tee off on hole 1</button>`}</div>
+      </ul>` : ''}
+      <div class="actions">${canContinue ? `<button class="btn ${done ? '' : 'ghost'}" data-act="continue" type="button">Continue · Hole ${nu+1}</button><button class="btn ghost" data-act="new" type="button">New round</button>` : `<button class="btn ${done ? '' : 'ghost'}" data-act="new" type="button">Play a full round</button>`}</div>
       <p class="fine">${best}</p>
       <p class="fine">Based on the course at Trackside Golf @ Sleepy Hollow Storage, 1022 Mapleton Road.</p>`;
-  } else if (mode === 'result') {
+  } else if (kind === 'players') {
+    h = `<div><div class="eyebrow">Golfers on this phone</div><h2>Who’s playing?</h2></div>
+      <div class="plist">${store.players.map(q => {
+        const st = streakNow(q.daily);
+        return `<div class="prow ${q.id === store.active ? 'on' : ''}"><button class="pick" type="button" data-act="pick" data-id="${q.id}">${avatar(q.look, 44)}<span style="min-width:0"><b>${esc(q.name)}</b><small>${q.best != null ? `Best ${q.best} (${fmtPar(q.best - 27)})` : 'No rounds yet'}${st ? ` · ${st}-day streak` : ''}</small></span></button><button class="btn ghost sm" type="button" data-act="edit" data-id="${q.id}">Edit</button></div>`;
+      }).join('')}</div>
+      <div class="actions"><button class="btn" data-act="newp" type="button">New golfer</button>${p ? '<button class="btn ghost" data-act="home" type="button">Back</button>' : ''}</div>`;
+  } else if (kind === 'edit') {
+    h = editorHTML();
+  } else if (kind === 'daily') {
+    const d = p.daily, ok = chalResult.ok, tries = d.triesDay === dayKey() ? d.tries : 0;
+    h = `<div><div class="eyebrow">Daily challenge · Hole ${chal.h+1}</div><h2 class="${ok ? 'good' : ''}">${ok ? 'Challenge complete!' : 'Not this time'}</h2><p class="lede">${esc(chalResult.detail)}${ok ? ' Come back tomorrow for a new one.' : ''}</p></div>
+      <div class="big"><div><b>${streakNow(d)}</b><span>Day streak</span></div><div><b>${tries}</b><span>Tries today</span></div><div><b>${d.wins}</b><span>Challenges won</span></div></div>
+      <div class="actions"><button class="btn" data-act="daily" type="button">${ok ? 'Play it again' : 'Try again'}</button><button class="btn ghost" data-act="home" type="button">Clubhouse</button></div>
+      <p class="fine">Today: ${chal.text}.</p>`;
+  } else if (kind === 'result') {
     const i = round.hole, s = round.scores[i], nu = nextUnplayed();
     h = `<div><div class="eyebrow">Hole ${i+1} · Par 3</div><h2 class="${s <= 2 ? 'good' : ''}">${SCORE_NAMES[s] || s + ' strokes'}</h2></div>
       <div class="big"><div><b>${s}</b><span>Strokes</span></div><div><b>${fmtPar(toParOf(round.scores))}</b><span>To par</span></div><div><b>${round.scores.filter(x => x != null).length}</b><span>Holes played</span></div></div>
       ${cardTable(i)}
-      <div class="actions"><button class="btn" data-act="next" type="button">Tee off on hole ${nu+1}</button></div>`;
-  } else if (mode === 'menu') {
+      <div class="actions"><button class="btn" data-act="next" type="button">Tee off on hole ${nu+1}</button><button class="btn ghost" data-act="home" type="button">Clubhouse</button></div>`;
+  } else if (kind === 'menu' && mode === 'challenge') {
+    h = `<div><div class="eyebrow">Daily challenge · Shot ${strokes+1}</div><h2>${chal.text}</h2></div>
+      <div class="actions"><button class="btn" data-act="resume" type="button">Back to the hole</button><button class="btn ghost" data-act="daily" type="button">Restart attempt</button></div>
+      <div class="actions"><button class="btn ghost" data-act="home" type="button">Clubhouse</button>${soundBtn()}</div>`;
+  } else if (kind === 'menu') {
     const i = round.hole;
     h = `<div><div class="eyebrow">Round in progress</div><h2>Hole ${i+1}, shot ${strokes+1}</h2></div>
       ${cardTable(i)}
       <div class="actions"><button class="btn" data-act="resume" type="button">Back to hole ${i+1}</button><button class="btn ghost" data-act="restart" type="button" id="restartBtn">Start a new round</button></div>
-      <div class="actions"><button class="btn ghost" data-act="sound" type="button">Sound: ${store.sound ? 'On' : 'Off'}</button></div>
+      <div class="actions"><button class="btn ghost" data-act="home" type="button">Clubhouse</button>${soundBtn()}</div>
       <p class="fine">${best}</p>`;
-  } else if (mode === 'final') {
+  } else if (kind === 'final') {
     const total = round.scores.reduce((a, b) => a + b, 0);
-    h = `<div><div class="eyebrow">Round complete</div><h2 class="${store.lastNewBest ? 'good' : ''}">${total} strokes, ${fmtPar(total-27)}${store.lastNewBest ? ' · new best' : ''}</h2></div>
+    h = `<div><div class="eyebrow">Round complete · ${esc(p.name)}</div><h2 class="${lastNewBest ? 'good' : ''}">${total} strokes, ${fmtPar(total-27)}${lastNewBest ? ' · new best' : ''}</h2></div>
       ${cardTable(-1)}
-      <div class="big"><div><b>${round.scores.filter(s => s === 1).length}</b><span>Aces</span></div><div><b>${round.scores.filter(s => s === 2).length}</b><span>Birdies</span></div><div><b>${round.scores.filter(s => s === 3).length}</b><span>Pars</span></div><div><b>${store.best}</b><span>Best round</span></div></div>
-      <div class="actions"><button class="btn" data-act="new" type="button">Play again</button></div>`;
+      <div class="big"><div><b>${round.scores.filter(s => s === 1).length}</b><span>Aces</span></div><div><b>${round.scores.filter(s => s === 2).length}</b><span>Birdies</span></div><div><b>${round.scores.filter(s => s === 3).length}</b><span>Pars</span></div><div><b>${p.best}</b><span>Best round</span></div></div>
+      <div class="actions"><button class="btn" data-act="new" type="button">Play again</button><button class="btn ghost" data-act="home" type="button">Clubhouse</button></div>`;
   }
   sheet.innerHTML = h; sheet.hidden = false; sheet.scrollTop = 0;
   game.classList.add('sheet-open');
@@ -936,6 +1198,11 @@ function openSheet(mode) {
 function closeSheet() {
   sheetMode = null; sheet.hidden = true; game.classList.remove('sheet-open');
 }
+function goHome() { hole = null; mode = null; stance = null; state = 'menu'; openSheet('start'); }
+function usePlayer(id) { store.active = id; round = cur().round; save(); goHome(); }
+function editPlayer(p) { draft = p ? {id:p.id, name:p.name, look:{...p.look}} : {id:null, name:'', look:randomLook()}; openSheet('edit'); }
+sheet.addEventListener('input', e => { if (e.target.id === 'pname' && draft) draft.name = e.target.value; });
+sheet.addEventListener('keydown', e => { if (e.target.id === 'pname' && e.key === 'Enter') e.target.blur(); });
 sheet.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   unlockAudio();
@@ -948,6 +1215,30 @@ sheet.addEventListener('click', e => {
     newRound();
   }
   else if (act === 'sound') { store.sound = !store.sound; save(); b.textContent = `Sound: ${store.sound ? 'On' : 'Off'}`; if (store.sound) unlockAudio(); }
+  else if (act === 'daily') startChallenge();
+  else if (act === 'home') goHome();
+  else if (act === 'players') openSheet('players');
+  else if (act === 'pick') usePlayer(b.dataset.id);
+  else if (act === 'edit') editPlayer(store.players.find(q => q.id === b.dataset.id));
+  else if (act === 'newp') editPlayer(null);
+  else if (act === 'look') {
+    draft.look[b.dataset.k] = b.dataset.v;
+    b.parentElement.querySelectorAll('[data-act="look"]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    $('#preview').innerHTML = avatarSVG(draft.look);
+  }
+  else if (act === 'shuffle') { draft.look = randomLook(); const y = sheet.scrollTop; openSheet('edit'); sheet.scrollTop = y; }
+  else if (act === 'saveP') {
+    const name = draft.name.trim().replace(/\s+/g, ' ') || 'Golfer';
+    const p = store.players.find(q => q.id === draft.id);
+    if (p) { p.name = name; p.look = draft.look; save(); openSheet('players'); }
+    else { const q = newPlayer(name, draft.look); store.players.push(q); usePlayer(q.id); }
+  }
+  else if (act === 'deleteP') {
+    if (!deleteArmed) { deleteArmed = true; b.textContent = 'Tap again to delete'; b.classList.add('warn'); return; }
+    store.players = store.players.filter(q => q.id !== draft.id);
+    if (!cur()) { store.active = store.players[0].id; round = cur().round; }
+    save(); openSheet('players');
+  }
 });
 
 /* ---------- Loop ---------- */
@@ -967,7 +1258,7 @@ function frame(now) {
 function boot() {
   load();
   resize();
-  openSheet('start');
+  if (cur()) openSheet('start'); else editPlayer(null);
   requestAnimationFrame(frame);
 }
 window.addEventListener('resize', resize);
